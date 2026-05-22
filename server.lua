@@ -1,7 +1,8 @@
 local PROTOCOL = "secure_storage"
 local MODEM_SIDE = "top"
-local BUFFER = "minecraft:chest_0" -- buffer chest next to Inventory Manager
-local MANAGER_SIDE = "bottom"          -- side of buffer from Inventory Manager
+
+local BUFFER = "minecraft:chest_0" -- change this
+local MANAGER_SIDE = "up"          -- side of buffer from Inventory Manager
 
 local AUTHORIZED = {
     [12] = true, -- change to your pocket computer ID
@@ -15,6 +16,16 @@ local manager =
 
 if not manager then
     error("No Inventory Manager found")
+end
+
+-- Build clean fallback names
+local function makeNiceName(name)
+    name = name:gsub("^.+:", "") -- remove mod prefix
+    name = name:gsub("_", " ")
+
+    return name:gsub("(%a)([%w']*)", function(first, rest)
+        return first:upper() .. rest
+    end)
 end
 
 local function isInventory(name)
@@ -34,6 +45,7 @@ local function getInventories()
     return inventories
 end
 
+-- Scan all storage
 local function scanItems()
     local items = {}
 
@@ -42,17 +54,13 @@ local function scanItems()
 
         for slot, item in pairs(inv.list()) do
             local key = item.name
+            local display = item.displayName or makeNiceName(item.name)
 
             if not items[key] then
                 items[key] = {
                     name = item.name,
-                    local shortName = item.name
-shortName = shortName:gsub("^.+:", "") -- remove minecraft:
-shortName = shortName:gsub("_", " ")   -- iron_ingot -> iron ingot
-shortName = shortName:gsub("^%l", string.upper)
-
-displayName = item.displayName or shortName,
-                    count = 0,
+                    displayName = display,
+                    count = 0
                 }
             end
 
@@ -60,32 +68,42 @@ displayName = item.displayName or shortName,
         end
     end
 
-    return items
+    local result = {}
+
+    for _, item in pairs(items) do
+        table.insert(result, item)
+    end
+
+    table.sort(result, function(a, b)
+        return a.displayName < b.displayName
+    end)
+
+    return result
 end
 
+-- Search item list
 local function searchItems(query)
     query = string.lower(query or "")
     local results = {}
 
-    for name, data in pairs(scanItems()) do
-        local display = string.lower(data.displayName or name)
+    for _, item in ipairs(scanItems()) do
+        local id = string.lower(item.name)
+        local display = string.lower(item.displayName)
 
-        if string.find(string.lower(name), query, 1, true)
-        or string.find(display, query, 1, true) then
-            table.insert(results, data)
+        if query == ""
+            or string.find(id, query, 1, true)
+            or string.find(display, query, 1, true)
+        then
+            table.insert(results, item)
         end
     end
-
-    table.sort(results, function(a, b)
-        return a.displayName < b.displayName
-    end)
 
     return results
 end
 
+-- Move item to buffer chest
 local function moveToBuffer(itemName, amount)
     local remaining = amount
-    local buffer = peripheral.wrap(BUFFER)
 
     for _, invName in ipairs(getInventories()) do
         local inv = peripheral.wrap(invName)
@@ -105,19 +123,21 @@ local function moveToBuffer(itemName, amount)
     return amount - remaining
 end
 
+-- Deliver to linked player
 local function giveToPlayer(itemName, amount)
     return manager.addItemToPlayer(MANAGER_SIDE, {
         name = itemName,
-        count = amount,
+        count = amount
     })
 end
 
 print("Secure storage server running.")
-print("Computer ID:", os.getComputerID())
+print("Computer ID: " .. os.getComputerID())
 
 while true do
     local sender, msg = rednet.receive(PROTOCOL)
 
+    -- Security check
     if not AUTHORIZED[sender] then
         rednet.send(sender, {
             ok = false,
@@ -125,12 +145,15 @@ while true do
         }, PROTOCOL)
 
     elseif type(msg) == "table" then
+
+        -- Search request
         if msg.type == "search" then
             rednet.send(sender, {
                 ok = true,
                 results = searchItems(msg.query)
             }, PROTOCOL)
 
+        -- Item request
         elseif msg.type == "request" then
             local item = msg.item
             local count = tonumber(msg.count) or 1
@@ -142,7 +165,7 @@ while true do
             end
 
             rednet.send(sender, {
-                ok = moved == count,
+                ok = moved > 0,
                 moved = moved,
                 requested = count,
                 item = item
