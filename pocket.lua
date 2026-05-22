@@ -46,7 +46,6 @@ local function searchUI()
 
     for i, item in ipairs(results) do
         print(i .. ". " .. item.displayName)
-        print("   " .. item.name)
         print("   Count: " .. item.count)
     end
 
