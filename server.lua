@@ -46,7 +46,12 @@ local function scanItems()
             if not items[key] then
                 items[key] = {
                     name = item.name,
-                    displayName = item.displayName or item.name,
+                    local shortName = item.name
+shortName = shortName:gsub("^.+:", "") -- remove minecraft:
+shortName = shortName:gsub("_", " ")   -- iron_ingot -> iron ingot
+shortName = shortName:gsub("^%l", string.upper)
+
+displayName = item.displayName or shortName,
                     count = 0,
                 }
             end
