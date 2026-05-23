@@ -1,6 +1,189 @@
 local PROTOCOL = "secure_storage"
 local MODEM_SIDE = "top"
 
+local BUFFER = "minecraft:barrel_3" -- change this
+local MANAGER_SIDE = "down"          -- side of buffer from Inventory Manager
+local CACHE_TIME = 20              -- seconds between rescans
+
+local USERS = {
+    [19] = "Michael", -- pocket computer ID = name
+}
+
+rednet.open(MODEM_SIDE)
+
+local manager =
+    peripheral.find("inventoryManager") or
+    peripheral.find("inventory_manager")
+
+if not manager then
+    error("No Inventory Manager found")
+end
+
+local cache = {}
+local lastScan = 0
+
+local function makeNiceName(name)
+    name = name:gsub("^.+:", "")
+    name = name:gsub("_", " ")
+
+    return name:gsub("(%a)([%w']*)", function(first, rest)
+        return first:upper() .. rest
+    end)
+end
+
+local function isInventory(name)
+    return peripheral.hasType(name, "inventory") and name ~= BUFFER
+end
+
+local function getInventories()
+    local inventories = {}
+
+    for _, name in ipairs(peripheral.getNames()) do
+        if isInventory(name) then
+            table.insert(inventories, name)
+        end
+    end
+
+    return inventories
+end
+
+local function scanItems()
+    local items = {}
+
+    for _, invName in ipairs(getInventories()) do
+        local inv = peripheral.wrap(invName)
+
+        for slot, item in pairs(inv.list()) do
+            local key = item.name
+
+            if not items[key] then
+                items[key] = {
+                    name = item.name,
+                    displayName = item.displayName or makeNiceName(item.name),
+                    count = 0
+                }
+            end
+
+            items[key].count = items[key].count + item.count
+        end
+    end
+
+    local result = {}
+
+    for _, item in pairs(items) do
+        table.insert(result, item)
+    end
+
+    table.sort(result, function(a, b)
+        return a.displayName < b.displayName
+    end)
+
+    return result
+end
+
+local function getCachedItems()
+    if os.clock() - lastScan > CACHE_TIME then
+        cache = scanItems()
+        lastScan = os.clock()
+    end
+
+    return cache
+end
+
+local function refreshCache()
+    lastScan = 0
+end
+
+local function searchItems(query)
+    query = string.lower(query or "")
+    local results = {}
+
+    for _, item in ipairs(getCachedItems()) do
+        local id = string.lower(item.name)
+        local display = string.lower(item.displayName)
+
+        if query == ""
+            or string.find(id, query, 1, true)
+            or string.find(display, query, 1, true)
+        then
+            table.insert(results, item)
+        end
+    end
+
+    return results
+end
+
+local function moveToBuffer(itemName, amount)
+    local remaining = amount
+
+    for _, invName in ipairs(getInventories()) do
+        local inv = peripheral.wrap(invName)
+
+        for slot, item in pairs(inv.list()) do
+            if item.name == itemName and remaining > 0 then
+                local moved = inv.pushItems(BUFFER, slot, remaining)
+                remaining = remaining - moved
+            end
+        end
+
+        if remaining <= 0 then
+            break
+        end
+    end
+
+    return amount - remaining
+end
+
+local function giveToPlayer(itemName, amount)
+    return manager.addItemToPlayer(MANAGER_SIDE, {
+        name = itemName,
+        count = amount
+    })
+end
+
+print("Secure storage server running.")
+print("Computer ID: " .. os.getComputerID())
+
+while true do
+    local sender, msg = rednet.receive(PROTOCOL)
+
+    if not USERS[sender] then
+        rednet.send(sender, {
+            ok = false,
+            error = "Unauthorized computer ID"
+        }, PROTOCOL)
+
+    elseif type(msg) == "table" then
+        if msg.type == "search" then
+            rednet.send(sender, {
+                ok = true,
+                user = USERS[sender],
+                results = searchItems(msg.query)
+            }, PROTOCOL)
+
+        elseif msg.type == "request" then
+            local item = msg.item
+            local count = tonumber(msg.count) or 1
+
+            local moved = moveToBuffer(item, count)
+
+            if moved > 0 then
+                giveToPlayer(item, moved)
+                refreshCache()
+            end
+
+            rednet.send(sender, {
+                ok = moved > 0,
+                user = USERS[sender],
+                moved = moved,
+                requested = count,
+                item = item
+            }, PROTOCOL)
+        end
+    end
+endlocal PROTOCOL = "secure_storage"
+local MODEM_SIDE = "top"
+
 local BUFFER = "minecraft:chest_0" -- change this
 local MANAGER_SIDE = "up"
 local CACHE_TIME = 20
