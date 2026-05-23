@@ -1,20 +1,13 @@
 local PROTOCOL = "secure_storage"
 local MODEM_SIDE = "back"
-local SERVER_ID = 7 -- change this
+local SERVER_ID = 20 -- change this
 
 rednet.open(MODEM_SIDE)
 
-local CATEGORIES = {
-    "All", "Blocks", "Ores", "Storage",
-    "Redstone", "Tools", "Food", "Machines", "Other"
-}
-
-local selectedCategory = "All"
 local scroll = 0
 local results = {}
-local shown = {}
-local tabButtons = {}
 local itemRows = {}
+local searchButton = nil
 
 local function clear()
     term.setBackgroundColor(colors.black)
@@ -30,52 +23,6 @@ local function niceName(name)
     return name:gsub("(%a)([%w_']*)", function(first, rest)
         return first:upper() .. rest
     end)
-end
-
-local function getCategory(itemName)
-    itemName = string.lower(itemName)
-
-    if itemName:find("chest") or itemName:find("barrel") or itemName:find("shulker") then
-        return "Storage"
-    elseif itemName:find("ore") or itemName:find("ingot") or itemName:find("nugget")
-        or itemName:find("diamond") or itemName:find("emerald") then
-        return "Ores"
-    elseif itemName:find("redstone") or itemName:find("repeater") or itemName:find("comparator")
-        or itemName:find("piston") or itemName:find("lever") or itemName:find("button") then
-        return "Redstone"
-    elseif itemName:find("pickaxe") or itemName:find("axe") or itemName:find("shovel")
-        or itemName:find("sword") or itemName:find("hoe") then
-        return "Tools"
-    elseif itemName:find("apple") or itemName:find("bread") or itemName:find("beef")
-        or itemName:find("porkchop") or itemName:find("chicken") or itemName:find("carrot")
-        or itemName:find("potato") then
-        return "Food"
-    elseif itemName:find("machine") or itemName:find("motor") or itemName:find("generator")
-        or itemName:find("furnace") or itemName:find("crafter") then
-        return "Machines"
-    elseif itemName:find("stone") or itemName:find("dirt") or itemName:find("wood")
-        or itemName:find("log") or itemName:find("planks") or itemName:find("glass")
-        or itemName:find("brick") or itemName:find("block") then
-        return "Blocks"
-    else
-        return "Other"
-    end
-end
-
-local function sendRequest(msg)
-    rednet.send(SERVER_ID, msg, PROTOCOL)
-    local _, response = rednet.receive(PROTOCOL, 5)
-    return response
-end
-
-local function filterResults()
-    shown = {}
-
-    for _, item in ipairs(results) do
-        if selectedCategory == "All" or getCategory(item.name) == selectedCategory then
-            table.insert(shown, item)
-        end
-    end
 end
 
 local function drawButton(x, y, text, selected)
@@ -94,80 +41,10 @@ local function drawButton(x, y, text, selected)
     term.setTextColor(colors.white)
 end
 
-local function drawUI()
-    clear()
-
-    local w, h = term.getSize()
-    tabButtons = {}
-    itemRows = {}
-
-    term.setCursorPos(1, 1)
-    term.setTextColor(colors.yellow)
-    write("Remote Storage")
-    term.setTextColor(colors.white)
-
-    local x = 1
-    local y = 3
-
-    for _, category in ipairs(CATEGORIES) do
-        local width = #category + 2
-
-        if x + width > w then
-            y = y + 1
-            x = 1
-        end
-
-        drawButton(x, y, category, category == selectedCategory)
-
-        table.insert(tabButtons, {
-            category = category,
-            x1 = x,
-            x2 = x + width - 1,
-            y = y
-        })
-
-        x = x + width + 1
-    end
-
-    local listTop = y + 2
-    local listBottom = h - 2
-    local visibleRows = listBottom - listTop + 1
-
-    filterResults()
-
-    local maxScroll = math.max(0, #shown - visibleRows)
-    if scroll > maxScroll then scroll = maxScroll end
-    if scroll < 0 then scroll = 0 end
-
-    for row = 1, visibleRows do
-        local index = scroll + row
-        local item = shown[index]
-
-        if item then
-            local display = item.displayName or niceName(item.name)
-            local line = display .. " x" .. item.count
-
-            if #line > w then
-                line = line:sub(1, w - 3) .. "..."
-            end
-
-            local screenY = listTop + row - 1
-            term.setCursorPos(1, screenY)
-            term.setTextColor(colors.white)
-            write(line)
-
-            itemRows[screenY] = item
-        end
-    end
-
-    term.setCursorPos(1, h - 1)
-    term.setTextColor(colors.lightGray)
-    write("Scroll | Tap item | S=Search | Q=Quit")
-
-    term.setCursorPos(1, h)
-    term.setTextColor(colors.gray)
-    write("Showing " .. #shown .. " items")
-    term.setTextColor(colors.white)
+local function sendRequest(msg)
+    rednet.send(SERVER_ID, msg, PROTOCOL)
+    local _, response = rednet.receive(PROTOCOL, 5)
+    return response
 end
 
 local function searchItems()
@@ -185,7 +62,6 @@ local function searchItems()
 
     if response and response.ok then
         results = response.results
-        selectedCategory = "All"
         scroll = 0
     else
         clear()
@@ -194,61 +70,184 @@ local function searchItems()
     end
 end
 
-local function requestItem(item)
-    local display = item.displayName or niceName(item.name)
+local function drawUI()
+    clear()
 
-    while true do
-        clear()
+    local w, h = term.getSize()
+    itemRows = {}
+    searchButton = nil
 
-        print(display)
-        print("Available: " .. item.count)
-        print()
-        print("[1] 1")
-        print("[2] 16")
-        print("[3] 32")
-        print("[4] 64")
-        print("[5] Custom")
-        print("[6] Cancel")
-        print()
+    term.setCursorPos(1, 1)
+    term.setTextColor(colors.yellow)
+    write("Remote Storage")
+    term.setTextColor(colors.white)
 
-        write("> ")
-        local choice = read()
+    local listTop = 3
+    local listBottom = h - 3
+    local visibleRows = listBottom - listTop + 1
 
-        local amount = nil
+    local maxScroll = math.max(0, #results - visibleRows)
 
-        if choice == "1" then
-            amount = 1
-        elseif choice == "2" then
-            amount = 16
-        elseif choice == "3" then
-            amount = 32
-        elseif choice == "4" then
-            amount = 64
-        elseif choice == "5" then
-            write("Amount: ")
-            amount = tonumber(read()) or 1
-        elseif choice == "6" or choice == "" then
-            return
-        end
+    if scroll > maxScroll then scroll = maxScroll end
+    if scroll < 0 then scroll = 0 end
 
-        if amount then
-            local response = sendRequest({
-                type = "request",
-                item = item.name,
-                count = amount
-            })
+    for row = 1, visibleRows do
+        local index = scroll + row
+        local item = results[index]
 
-            clear()
+        if item then
+            local display = item.displayName or niceName(item.name)
+            local line = display .. " x" .. item.count
 
-            if response and response.moved then
-                print("Requested: " .. response.requested)
-                print("Delivered: " .. response.moved)
-            else
-                print("Request failed.")
+            if #line > w then
+                line = line:sub(1, w - 3) .. "..."
             end
 
-            sleep(2)
-            return
+            local screenY = listTop + row - 1
+
+            term.setCursorPos(1, screenY)
+            term.setTextColor(colors.white)
+            write(line)
+
+            itemRows[screenY] = item
+        end
+    end
+
+    searchButton = {
+        x1 = 1,
+        x2 = 10,
+        y = h - 1
+    }
+
+    drawButton(1, h - 1, "Search", false)
+
+    term.setCursorPos(12, h - 1)
+    term.setTextColor(colors.lightGray)
+    write("Scroll | Tap item | Q=Quit")
+
+    term.setCursorPos(1, h)
+    term.setTextColor(colors.gray)
+    write("Showing " .. #results .. " items")
+    term.setTextColor(colors.white)
+end
+
+local function requestItem(item)
+    local display = item.displayName or niceName(item.name)
+    local buttons = {}
+
+    local function drawAmountScreen()
+        clear()
+
+        term.setCursorPos(1, 1)
+        term.setTextColor(colors.yellow)
+        write(display)
+
+        term.setCursorPos(1, 2)
+        term.setTextColor(colors.white)
+        write("Available: " .. item.count)
+
+        buttons = {}
+
+        local options = {
+            { label = "1", amount = 1 },
+            { label = "16", amount = 16 },
+            { label = "32", amount = 32 },
+            { label = "64", amount = 64 },
+            { label = "Custom", amount = "custom" },
+            { label = "Cancel", amount = "cancel" },
+        }
+
+        local y = 4
+
+        for _, option in ipairs(options) do
+            local x = 2
+            local width = #option.label + 2
+
+            drawButton(x, y, option.label, false)
+
+            table.insert(buttons, {
+                x1 = x,
+                x2 = x + width - 1,
+                y = y,
+                amount = option.amount
+            })
+
+            y = y + 2
+        end
+    end
+
+    local function sendAmount(amount)
+        local response = sendRequest({
+            type = "request",
+            item = item.name,
+            count = amount
+        })
+
+        clear()
+
+        if response and response.moved then
+            print("Requested: " .. response.requested)
+            print("Delivered: " .. response.moved)
+        else
+            print("Request failed.")
+        end
+
+        sleep(2)
+    end
+
+    while true do
+        drawAmountScreen()
+
+        local event, button, x, y = os.pullEvent()
+
+        if event == "mouse_click" then
+            for _, b in ipairs(buttons) do
+                if y == b.y and x >= b.x1 and x <= b.x2 then
+                    if b.amount == "cancel" then
+                        return
+                    elseif b.amount == "custom" then
+                        clear()
+                        print(display)
+                        print("Available: " .. item.count)
+                        print()
+                        write("Amount: ")
+
+                        local amount = tonumber(read()) or 1
+                        sendAmount(amount)
+                        return
+                    else
+                        sendAmount(b.amount)
+                        return
+                    end
+                end
+            end
+
+        elseif event == "key" then
+            if button == keys.one then
+                sendAmount(1)
+                return
+            elseif button == keys.two then
+                sendAmount(16)
+                return
+            elseif button == keys.three then
+                sendAmount(32)
+                return
+            elseif button == keys.four then
+                sendAmount(64)
+                return
+            elseif button == keys.five then
+                clear()
+                print(display)
+                print("Available: " .. item.count)
+                print()
+                write("Amount: ")
+
+                local amount = tonumber(read()) or 1
+                sendAmount(amount)
+                return
+            elseif button == keys.six or button == keys.q then
+                return
+            end
         end
     end
 end
@@ -261,14 +260,13 @@ while true do
     local event, button, x, y = os.pullEvent()
 
     if event == "mouse_click" then
-        for _, tab in ipairs(tabButtons) do
-            if y == tab.y and x >= tab.x1 and x <= tab.x2 then
-                selectedCategory = tab.category
-                scroll = 0
-            end
-        end
-
-        if itemRows[y] then
+        if searchButton
+            and y == searchButton.y
+            and x >= searchButton.x1
+            and x <= searchButton.x2
+        then
+            searchItems()
+        elseif itemRows[y] then
             requestItem(itemRows[y])
         end
 
