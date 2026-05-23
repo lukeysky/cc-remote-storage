@@ -26,6 +26,7 @@ end
 local function niceName(name)
     name = name:gsub("^.+:", "")
     name = name:gsub("_", " ")
+
     return name:gsub("(%a)([%w_']*)", function(first, rest)
         return first:upper() .. rest
     end)
@@ -82,12 +83,11 @@ local function drawButton(x, y, text, selected)
 
     if selected then
         term.setBackgroundColor(colors.blue)
-        term.setTextColor(colors.white)
     else
         term.setBackgroundColor(colors.gray)
-        term.setTextColor(colors.white)
     end
 
+    term.setTextColor(colors.white)
     write(" " .. text .. " ")
 
     term.setBackgroundColor(colors.black)
@@ -110,15 +110,14 @@ local function drawUI()
     local y = 3
 
     for _, category in ipairs(CATEGORIES) do
-        local label = category
-        local width = #label + 2
+        local width = #category + 2
 
         if x + width > w then
             y = y + 1
             x = 1
         end
 
-        drawButton(x, y, label, category == selectedCategory)
+        drawButton(x, y, category, category == selectedCategory)
 
         table.insert(tabButtons, {
             category = category,
@@ -196,33 +195,62 @@ local function searchItems()
 end
 
 local function requestItem(item)
-    clear()
-
     local display = item.displayName or niceName(item.name)
 
-    print(display)
-    print("Available: " .. item.count)
-    print()
+    while true do
+        clear()
 
-    write("Amount: ")
-    local amount = tonumber(read()) or 1
+        print(display)
+        print("Available: " .. item.count)
+        print()
+        print("[1] 1")
+        print("[2] 16")
+        print("[3] 32")
+        print("[4] 64")
+        print("[5] Custom")
+        print("[6] Cancel")
+        print()
 
-    local response = sendRequest({
-        type = "request",
-        item = item.name,
-        count = amount
-    })
+        write("> ")
+        local choice = read()
 
-    clear()
+        local amount = nil
 
-    if response and response.moved then
-        print("Requested: " .. response.requested)
-        print("Delivered: " .. response.moved)
-    else
-        print("Request failed.")
+        if choice == "1" then
+            amount = 1
+        elseif choice == "2" then
+            amount = 16
+        elseif choice == "3" then
+            amount = 32
+        elseif choice == "4" then
+            amount = 64
+        elseif choice == "5" then
+            write("Amount: ")
+            amount = tonumber(read()) or 1
+        elseif choice == "6" or choice == "" then
+            return
+        end
+
+        if amount then
+            local response = sendRequest({
+                type = "request",
+                item = item.name,
+                count = amount
+            })
+
+            clear()
+
+            if response and response.moved then
+                print("Requested: " .. response.requested)
+                print("Delivered: " .. response.moved)
+            else
+                print("Request failed.")
+            end
+
+            sleep(2)
+            return
+        end
     end
-
-    sleep(2)
 end
 
 searchItems()
@@ -245,8 +273,7 @@ while true do
         end
 
     elseif event == "mouse_scroll" then
-        local direction = button
-        scroll = scroll + direction
+        scroll = scroll + button
 
     elseif event == "key" then
         if button == keys.q then
@@ -261,10 +288,3 @@ while true do
         end
     end
 end
-
---Tap tab = change category
---Tap item = request amount
---Scroll wheel / touch scroll = move list
---S = new search
---Q = quit
---Up/Down = scroll
